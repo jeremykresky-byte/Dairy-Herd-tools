@@ -1,0 +1,170 @@
+====================================================
+WRIDAIR DAIRY HERD MANAGER - FIREBASE SETUP GUIDE
+====================================================
+
+This guide walks you through setting up Firebase so your
+dairy herd manager works with multi-user login and shared
+data. It takes about 10 minutes and is completely FREE.
+
+====================================================
+STEP 1: CREATE A FIREBASE PROJECT
+====================================================
+
+1. Go to https://console.firebase.google.com
+2. Click "Create a project" (or "Add project")
+3. Name it something like "wridair-dairy-herd"
+4. You can disable Google Analytics (not needed)
+5. Click "Create project" and wait for it to finish
+
+====================================================
+STEP 2: ENABLE AUTHENTICATION
+====================================================
+
+1. In your Firebase project, click "Authentication" in the left sidebar
+2. Click "Get started"
+3. Click on "Email/Password" provider
+4. Toggle "Enable" to ON
+5. Click "Save"
+
+Now create accounts for your team:
+1. Click the "Users" tab
+2. Click "Add user"
+3. Enter email and password for each person (e.g.):
+   - jeremy@yourdomain.com / password123
+   - farmhand1@yourdomain.com / password123
+   - farmhand2@yourdomain.com / password123
+   etc.
+4. Share the email/password with each team member
+
+====================================================
+STEP 3: SET UP FIRESTORE DATABASE
+====================================================
+
+1. In the left sidebar, click "Firestore Database"
+2. Click "Create database"
+3. Choose "Start in test mode" (we'll secure it later)
+4. Select your nearest region (e.g., us-central1)
+5. Click "Enable"
+
+====================================================
+STEP 4: GET YOUR CONFIG VALUES
+====================================================
+
+1. Click the gear icon (Settings) > "Project settings"
+2. Scroll down to "Your apps" section
+3. Click the web icon (looks like </> )
+4. Register with nickname "Dairy Herd Manager"
+5. You'll see a config block like this:
+
+   const firebaseConfig = {
+     apiKey: "AIzaSyB...",
+     authDomain: "wridair-dairy-herd.firebaseapp.com",
+     projectId: "wridair-dairy-herd",
+     storageBucket: "wridair-dairy-herd.appspot.com",
+     messagingSenderId: "123456789",
+     appId: "1:123456789:web:abc123"
+   };
+
+====================================================
+STEP 5: UPDATE THE APP FILE
+====================================================
+
+1. Open dairy-herd-manager.html in a text editor (Notepad works)
+2. Search for "YOUR_API_KEY" (near the top of the <script> section)
+3. Replace the placeholder values with your actual values:
+
+   REPLACE THIS:
+   apiKey: "YOUR_API_KEY"
+   authDomain: "YOUR_PROJECT.firebaseapp.com"
+   projectId: "YOUR_PROJECT_ID"
+   storageBucket: "YOUR_PROJECT.appspot.com"
+   messagingSenderId: "YOUR_SENDER_ID"
+   appId: "YOUR_APP_ID"
+
+   WITH YOUR ACTUAL VALUES FROM STEP 4
+
+4. Save the file
+
+====================================================
+STEP 6: OPEN AND USE
+====================================================
+
+1. Double-click dairy-herd-manager.html to open in Chrome
+2. Log in with one of the accounts you created in Step 2
+3. The first login will automatically load all 74 animals
+4. Have your team open the same file and log in with their accounts
+5. Everyone sees the same data in real time!
+
+====================================================
+HOSTING (OPTIONAL - FOR REMOTE ACCESS)
+====================================================
+
+If you want everyone to access it from a web address
+(not just the local file), you can host it for free:
+
+Option A: Firebase Hosting (Recommended)
+1. Install Node.js from https://nodejs.org
+2. Open Command Prompt and run:
+   npm install -g firebase-tools
+   firebase login
+   firebase init hosting
+3. Put dairy-herd-manager.html in the "public" folder as index.html
+4. Run: firebase deploy
+5. You'll get a URL like: https://wridair-dairy-herd.web.app
+
+Option B: Just put it on a shared drive
+- Put the HTML file on a shared OneDrive/Google Drive folder
+- Everyone opens it from there
+- Data is still shared through Firebase regardless
+
+====================================================
+SECURING YOUR DATABASE (RECOMMENDED)
+====================================================
+
+Once everything is working, go to Firestore > Rules and
+replace the rules with:
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
+
+This ensures only logged-in users can read/write data.
+
+====================================================
+TROUBLESHOOTING
+====================================================
+
+Problem: "Firebase: Error (auth/configuration-not-found)"
+Solution: Make sure you replaced ALL the placeholder values
+
+Problem: Login works but no animals appear
+Solution: Check Firestore Database in Firebase console -
+  the animals collection should populate automatically
+
+Problem: Can't register new users
+Solution: Make sure Email/Password auth is enabled in
+  Firebase console > Authentication > Sign-in method
+
+Problem: Data doesn't sync between users
+Solution: Make sure everyone is using the same Firebase
+  project config values in their copy of the file
+
+====================================================
+COSTS
+====================================================
+
+Firebase free tier includes:
+- 50,000 document reads per day
+- 20,000 document writes per day
+- 1 GB storage
+- Unlimited authenticated users
+
+For a 4-5 person farm operation, you'll never come
+close to these limits. It's completely free.
+
+====================================================
