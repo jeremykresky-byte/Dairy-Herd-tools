@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Update Breeding Records — Confirmed In-Calf Cows</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 24px auto; padding: 0 16px; color: #222; }
+  h1 { margin-bottom: 4px; }
+  .sub { color: #666; margin-bottom: 24px; }
+  .panel { border: 1px solid #ddd; border-radius: 6px; padding: 16px; margin-bottom: 16px; background: #fafafa; }
+  .login-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+  button { padding: 8px 16px; border: 0; border-radius: 4px; font-size: 14px; cursor: pointer; }
+  button.primary { background: #2d6a4f; color: white; }
+  button.primary:disabled { background: #999; cursor: not-allowed; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; font-size: 14px; }
+  th { background: #f0f0f0; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+  .pill.match { background: #d4edda; color: #155724; }
+  .pill.nomatch { background: #f8d7da; color: #721c24; }
+  .pill.done { background: #cce5ff; color: #004085; }
+  .pill.skip { background: #fff3cd; color: #856404; }
+  #status { margin-top: 12px; padding: 8px 12px; border-radius: 4px; display: none; }
+  .ok { background: #d4edda; color: #155724; }
+  .err { background: #f8d7da; color: #721c24; }
+</style>
+</head>
+<body>
+
+<h1>Update Confirmed In-Calf Breeding Records</h1>
+<p class="sub">Writes "Confirmed" breeding records to Firestore for cows marked "In Calf" on the May 7 &amp; May 21, 2026 vet checks.</p>
+
+<div class="panel">
+  <strong>Step 1: Sign in</strong>
+  <div id="loginPanel" class="login-row" style="margin-top: 8px;">
+    <input id="email" type="email" placeholder="Email">
+    <input id="password" type="password" placeholder="Password">
+    <button class="primary" onclick="signIn()">Sign in</button>
+    <span id="authStatus"></span>
+  </div>
+  <div id="signedInPanel" style="display:none; margin-top: 8px;">
+    Signed in as <strong id="userEmail"></strong>
+    <button onclick="signOut()" style="margin-left: 12px;">Sign out</button>
+  </div>
+</div>
+
+<div class="panel">
+  <strong>Step 2: Review</strong>
+  <p style="margin: 8px 0;">The 6 cows below were marked "In Calf" with breeding dates on the vet checks.
+  Match status shows which ones found an existing animal in the herd by herdCode.</p>
+  <table id="recordsTable">
+    <thead>
+      <tr>
+        <th>Source</th>
+        <th>Herd Code</th>
+        <th>Bred</th>
+        <th>Matched Animal</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody id="recordsBody"></tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <strong>Step 3: Apply</strong>
+  <p style="margin: 8px 0;">Writes a Confirmed breeding record for each matched cow.
+  This is idempotent — each record uses a deterministic ID (<code>vetcheck-{herdCode}-{date}</code>), so re-running won't create duplicates.
+  Auto-generates 30/60/90-day pregnancy checks for each.</p>
+  <button id="applyBtn" class="primary" onclick="applyUpdates()" disabled>Apply Updates</button>
+  <div id="status"></div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyAi27I9tQBwcW2zEMwL-Al9sLfwbMpoO14",
+  authDomain: "wridair-farms-dairy-herd.firebaseapp.com",
+  projectId: "wridair-farms-dairy-herd",
+  storageBucket: "wridair-farms-dairy-herd.firebasestorage.app",
+  messagingSenderId: "70276609586",
+  appId: "1:70276609586:web:bd97cc795129442ba4ee2b"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const firestore = firebase.firestore();
+
+// "In Calf" entries transcribed from the May 7 & May 21, 2026 vet check sheets.
+// herdCode is the digits after any S/K/H prefix on the sheet.
+const VET_CHECK_ENTRIES = [
+  { source: 'May 7',  herdCode: '6004', date: '2026-04-05' },
+  { source: 'May 7',  herdCode: '650',  date: '2026-04-01' },
+  { source: 'May 7',  herdCode: '656',  date: '2026-04-01' },
+  { source: 'May 21', herdCode: '659',  date: '2026-04-20' },
+  { source: 'May 21', herdCode: '637',  date: '2026-04-20' },
+  { source: 'May 21', herdCode: '630',  date: '2026-04-22' },
+];
+
+let animals = [];
+let resolved = [];
+
+function showAuthed(user) {
+  document.getElementById('loginPanel').style.display = 'none';
+  document.getElementById('signedInPanel').style.display = 'block';
+  document.getElementById('userEmail').textContent = user.email;
+  loadAnimalsAndResolve();
+}
+
+function showLoggedOut() {
+  document.getElementById('loginPanel').style.display = 'flex';
+  document.getElementById('signedInPanel').style.display = 'none';
+  document.getElementById('applyBtn').disabled = true;
+  document.getElementById('recordsBody').innerHTML = '';
+}
+
+auth.onAuthStateChanged(user => {
+  if (user) showAuthed(user); else showLoggedOut();
+});
+
+function signIn() {
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+  document.getElementById('authStatus').textContent = 'Signing in...';
+  auth.signInWithEmailAndPassword(email, password)
+    .catch(err => { document.getElementById('authStatus').textContent = 'Error: ' + err.message; });
+}
+
+function signOut() { auth.signOut(); }
+
+async function loadAnimalsAndResolve() {
+  const snap = await firestore.collection('animals').get();
+  animals = snap.docs.map(d => ({ _docId: d.id, ...d.data() }));
+  resolved = VET_CHECK_ENTRIES.map(entry => {
+    // Prefer Active status when multiple animals share a herdCode (calves vs active cows recycle codes).
+    const matches = animals.filter(a => a.herdCode === entry.herdCode);
+    const match = matches.find(a => a.status === 'Active') || matches[0] || null;
+    return { ...entry, match };
+  });
+  renderTable();
+  document.getElementById('applyBtn').disabled = !resolved.some(r => r.match);
+}
+
+function renderTable() {
+  const tbody = document.getElementById('recordsBody');
+  tbody.innerHTML = resolved.map(r => `
+    <tr data-herd="${r.herdCode}">
+      <td>${r.source}</td>
+      <td><strong>${r.herdCode}</strong></td>
+      <td>${r.date}</td>
+      <td>${r.match ? `${r.match.name} <span style="color:#888;">(${r.match.regNum})</span>` : '<em>no match in animals collection</em>'}</td>
+      <td class="status-cell">${r.match ? '<span class="pill match">matched</span>' : '<span class="pill nomatch">no match — skipped</span>'}</td>
+    </tr>
+  `).join('');
+}
+
+function setStatus(msg, kind) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = kind;
+  el.style.display = 'block';
+}
+
+function setRowStatus(herdCode, html) {
+  const row = document.querySelector(`tr[data-herd="${herdCode}"] .status-cell`);
+  if (row) row.innerHTML = html;
+}
+
+async function applyUpdates() {
+  const btn = document.getElementById('applyBtn');
+  btn.disabled = true;
+  let added = 0, skipped = 0, errors = 0;
+
+  for (const r of resolved) {
+    if (!r.match) {
+      setRowStatus(r.herdCode, '<span class="pill skip">skipped (no match)</span>');
+      skipped++;
+      continue;
+    }
+    const breedingId = `vetcheck-${r.herdCode}-${r.date}`;
+    try {
+      await firestore.collection('breeding').doc(breedingId).set({
+        id: breedingId,
+        animalId: r.match.regNum,
+        date: r.date,
+        sire: null,
+        status: 'Confirmed',
+      });
+      await ensurePregChecks(breedingId, r.match.regNum, r.date);
+      setRowStatus(r.herdCode, '<span class="pill done">written</span>');
+      added++;
+    } catch (err) {
+      console.error(err);
+      setRowStatus(r.herdCode, `<span class="pill nomatch">error: ${err.message}</span>`);
+      errors++;
+    }
+  }
+
+  setStatus(`Done. ${added} written, ${skipped} skipped, ${errors} errors.`, errors ? 'err' : 'ok');
+  btn.disabled = false;
+}
+
+async function ensurePregChecks(breedingId, animalId, breedDate) {
+  const base = new Date(breedDate);
+  for (const day of [30, 60, 90]) {
+    const due = new Date(base.getTime() + day * 86400000).toISOString().split('T')[0];
+    const checkId = `vetcheck-${breedingId}-${day}`;
+    await firestore.collection('pregChecks').doc(checkId).set({
+      id: checkId, breedingId, animalId, checkDay: day, dueDate: due, result: null,
+    });
+  }
+}
+</script>
+
+</body>
+</html>
