@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "agensi": {
+      "url": "https://mcp.agensi.io/mcp"
+    },
+    "agentskill": {
+      "command": "npx",
+      "args": ["-y", "agentskill-mcp"]
+    }
+  }
+}
